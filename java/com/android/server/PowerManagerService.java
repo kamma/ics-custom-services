@@ -253,7 +253,7 @@ public class PowerManagerService extends IPowerManager.Stub
     boolean mUnplugTurnsOnScreen;
     private int mWarningSpewThrottleCount;
     private long mWarningSpewThrottleTime;
-    private int mAnimationSetting = ANIM_SETTING_OFF;
+    private int mAnimationSetting = ANIM_SETTING_OFF | ANIM_SETTING_ON;
 
     // Must match with the ISurfaceComposer constants in C++.
     private static final int ANIM_SETTING_ON = 0x01;
@@ -272,6 +272,7 @@ public class PowerManagerService extends IPowerManager.Stub
     private native void nativeInit();
     private native void nativeSetPowerState(boolean screenOn, boolean screenBright);
     private native void nativeStartSurfaceFlingerAnimation(int mode);
+    private native void nativeStartSurfaceFlingerAnimationOn(int mode);
 
     /*
     static PrintStream mLog;
@@ -467,6 +468,7 @@ public class PowerManagerService extends IPowerManager.Stub
                 // recalculate everything
                 setScreenOffTimeoutsLocked();
 
+/*
                 final float windowScale = getFloat(WINDOW_ANIMATION_SCALE, 1.0f);
                 final float transitionScale = getFloat(TRANSITION_ANIMATION_SCALE, 1.0f);
                 mAnimationSetting = 0;
@@ -477,6 +479,7 @@ public class PowerManagerService extends IPowerManager.Stub
                     // Uncomment this if you want the screen-on animation.
                     // mAnimationSetting |= ANIM_SETTING_ON;
                 }
+*/
             }
         }
     }
@@ -2212,11 +2215,20 @@ public class PowerManagerService extends IPowerManager.Stub
             }
         }
 
+        void jumpToTarget() {
+            if (mSpew) Slog.d(TAG, "jumpToTarget targetValue=" + targetValue + ": " + mask);
+            setLightBrightness(mask, targetValue);
+            final int tv = targetValue;
+            curValue = tv;
+            targetValue = -1;
+        }
+
         public void run() {
             synchronized (mLocks) {
                 // we're turning off
                 final boolean turningOff = animating && targetValue == Power.BRIGHTNESS_OFF;
-                if (mAnimateScreenLights || !turningOff) {
+                final boolean turningOn = animating && curValue == Power.BRIGHTNESS_OFF;
+                if (mAnimateScreenLights || (!turningOff && !turningOn)) {
                     long now = SystemClock.uptimeMillis();
                     boolean more = mScreenBrightness.stepLocked();
                     if (more) {
@@ -2225,10 +2237,16 @@ public class PowerManagerService extends IPowerManager.Stub
                 } else {
                     // It's pretty scary to hold mLocks for this long, and we should
                     // redesign this, but it works for now.
-                    nativeStartSurfaceFlingerAnimation(
+                	if (turningOff) {
+                		nativeStartSurfaceFlingerAnimation(
                             mScreenOffReason == WindowManagerPolicy.OFF_BECAUSE_OF_PROX_SENSOR
                             ? 0 : mAnimationSetting);
-                    mScreenBrightness.jumpToTargetLocked();
+                    	mScreenBrightness.jumpToTargetLocked();
+                	} else if (turningOn) {
+                		jumpToTarget();
+                		nativeStartSurfaceFlingerAnimationOn(mAnimationSetting);
+                		animating = false;
+                	}
                 }
             }
         }
